@@ -1,0 +1,104 @@
+name: Build Sticky CJK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/build-sticky.yml'
+      - 'platformio.ini'
+      - 'partitions.csv'
+      - 'src/**'
+      - 'lib/**'
+      - 'freeink-sdk/**'
+      - 'scripts/**'
+      - 'fonts/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build-sticky:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.9.30'
+          enable-cache: false
+
+      - name: Install PlatformIO and font dependencies
+        run: |
+          uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+          uv pip install --system -U Pillow
+
+      - name: Build Sticky target
+        run: |
+          set -euo pipefail
+          pio run -e sticky | tee sticky-build.log
+
+      - name: Collect firmware artifacts
+        run: |
+          set -euo pipefail
+          build_dir='.pio/build/sticky'
+          out_dir='sticky-artifact'
+          mkdir -p "$out_dir"
+
+          for file in firmware.bin bootloader.bin partitions.bin firmware.elf firmware.map; do
+            if [ -f "$build_dir/$file" ]; then
+              cp "$build_dir/$file" "$out_dir/$file"
+            fi
+          done
+
+          # The application image is expected for every successful build.
+          test -f "$out_dir/firmware.bin"
+          test -f "$out_dir/bootloader.bin"
+          test -f "$out_dir/partitions.bin"
+
+          cp partitions.csv "$out_dir/partitions.csv"
+          cp sticky-build.log "$out_dir/sticky-build.log"
+          pio run -e sticky -t envdump > "$out_dir/platformio-envdump.txt"
+
+          (
+            cd "$out_dir"
+            sha256sum firmware.bin bootloader.bin partitions.bin > SHA256SUMS
+          )
+
+          cat > "$out_dir/README-FLASHING.txt" <<'EOF'
+          CrossPoint Reader CJK - reTerminal Sticky build artifact
+
+          Target: Seeed reTerminal Sticky / ESP32-S3 (PlatformIO env: sticky)
+
+          This artifact intentionally contains the separate application, bootloader,
+          and partition-table images plus the build log and PlatformIO environment.
+
+          IMPORTANT:
+          - Do NOT use X3/X4 Web Flasher manifests or X3/X4 firmware offsets.
+          - Do NOT flash these files until the Sticky flash layout has been validated
+            against the known-good upstream CrossPoint Sticky build/upload command.
+          - firmware.bin is the OTA application image; partitions.csv shows app0 at
+            0x10000, but the full-chip bootloader/partition offsets must be validated
+            before first manual or WebSerial flashing.
+          EOF
+
+          echo 'Collected:'
+          ls -lh "$out_dir"
+
+      - name: Upload Sticky firmware artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: CrossPoint-CJK-Sticky-${{ github.sha }}
+          path: sticky-artifact/
+          if-no-files-found: error
+          retention-days: 14
