@@ -1,0 +1,225 @@
+name: Backport CrossPoint 1.6 critical fixes
+
+on:
+  push:
+    branches:
+      - sync/1.6-critical-fixes
+    paths:
+      - .github/workflows/backport-1.6-critical.yml
+
+permissions:
+  contents: write
+
+jobs:
+  backport:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: sync/1.6-critical-fixes
+          fetch-depth: 0
+
+      - name: Apply guarded backports
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, found {count}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          # 1) Upstream #2722 + cache-format invalidation adapted to the CJK fork.
+          replace_once(
+              "lib/Epub/Epub/FootnoteEntry.h",
+              "#define FOOTNOTE_HREF_LEN 96\n",
+              "#define FOOTNOTE_HREF_LEN 256\n"
+              "// Backport of upstream #2722: Calibre-generated EPUB paths and URL-encoded\n"
+              "// fragments can exceed the old 96-byte href field.\n",
+          )
+          replace_once(
+              "lib/Epub/Epub/Section.cpp",
+              "// v35: section layout image probing runs with deterministic inflate scratch; invalidate\n"
+              "//      caches that may have silently omitted images after a low-memory probe failure.\n"
+              "constexpr uint8_t SECTION_FILE_VERSION = 35;\n",
+              "// v35: section layout image probing runs with deterministic inflate scratch; invalidate\n"
+              "//      caches that may have silently omitted images after a low-memory probe failure.\n"
+              "// v36 (CJK backport): Footnote href records grew from 96 to 256 bytes.\n"
+              "constexpr uint8_t SECTION_FILE_VERSION = 36;\n",
+          )
+
+          # 2) Upstream #2962 concept, adapted to this fork's page-count reflow anchor.
+          replace_once(
+              "src/activities/reader/EpubReaderActivity.h",
+              "  bool applyDeferredReposition();\n"
+              "  bool saveProgress(int spineIndex, int currentPage, int pageCount);\n",
+              "  bool applyDeferredReposition();\n"
+              "  // Explicit navigation supersedes the session-start/settings-reflow anchor.\n"
+              "  void clearDeferredReposition();\n"
+              "  bool saveProgress(int spineIndex, int currentPage, int pageCount);\n",
+          )
+          replace_once(
+              "src/activities/reader/EpubReaderActivity.cpp",
+              "  // Reset state so render() reloads and repositions on the target spine.\n"
+              "  {\n"
+              "    RenderLock lock(*this);\n"
+              "    currentSpineIndex = targetSpineIndex;\n",
+              "  // Reset state so render() reloads and repositions on the target spine.\n"
+              "  {\n"
+              "    RenderLock lock(*this);\n"
+              "    clearDeferredReposition();\n"
+              "    currentSpineIndex = targetSpineIndex;\n",
+          )
+          replace_once(
+              "src/activities/reader/EpubReaderActivity.cpp",
+              "      if (currentSpineIndex != targetSpineIndex) {\n"
+              "        RenderLock lock(*this);\n",
+              "      {\n"
+              "        RenderLock lock(*this);\n"
+              "        clearDeferredReposition();\n"
+              "      }\n\n"
+              "      if (currentSpineIndex != targetSpineIndex) {\n"
+              "        RenderLock lock(*this);\n",
+          )
+          replace_once(
+              "src/activities/reader/EpubReaderActivity.cpp",
+              "              const auto& chapterResult = std::get<ChapterResult>(result.data);\n"
+              "              RenderLock lock(*this);\n\n"
+              "              currentSpineIndex = chapterResult.spineIndex;\n",
+              "              const auto& chapterResult = std::get<ChapterResult>(result.data);\n"
+              "              RenderLock lock(*this);\n\n"
+              "              clearDeferredReposition();\n"
+              "              currentSpineIndex = chapterResult.spineIndex;\n",
+          )
+          replace_once(
+              "src/activities/reader/EpubReaderActivity.cpp",
+              "void EpubReaderActivity::pageTurn(bool isForwardTurn) {\n"
+              "  const unsigned long now = millis();\n"
+              "  prioritizeNextReaderRender();\n",
+              "void EpubReaderActivity::pageTurn(bool isForwardTurn) {\n"
+              "  const unsigned long now = millis();\n"
+              "  prioritizeNextReaderRender();\n"
+              "  {\n"
+              "    RenderLock lock(*this);\n"
+              "    clearDeferredReposition();\n"
+              "  }\n",
+          )
+          replace_once(
+              "src/activities/reader/EpubReaderActivity.cpp",
+              "  cachedChapterTotalPageCount = 0;  // consumed; don't read cached progress again\n"
+              "  return changed;\n"
+              "}\n\n"
+              "bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {\n",
+              "  clearDeferredReposition();\n"
+              "  return changed;\n"
+              "}\n\n"
+              "void EpubReaderActivity::clearDeferredReposition() {\n"
+              "  cachedChapterTotalPageCount = 0;\n"
+              "}\n\n"
+              "bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {\n",
+          )
+          replace_once(
+              "src/activities/reader/EpubReaderActivity.cpp",
+              "  {\n"
+              "    RenderLock lock(*this);\n"
+              "    pendingAnchor = std::move(anchor);\n"
+              "    currentSpineIndex = targetSpineIndex;\n",
+              "  {\n"
+              "    RenderLock lock(*this);\n"
+              "    clearDeferredReposition();\n"
+              "    pendingAnchor = std::move(anchor);\n"
+              "    currentSpineIndex = targetSpineIndex;\n",
+          )
+          replace_once(
+              "src/activities/reader/EpubReaderActivity.cpp",
+              "  {\n"
+              "    RenderLock lock(*this);\n"
+              "    currentSpineIndex = pos.spineIndex;\n"
+              "    nextPageNumber = pos.pageNumber;\n",
+              "  {\n"
+              "    RenderLock lock(*this);\n"
+              "    clearDeferredReposition();\n"
+              "    currentSpineIndex = pos.spineIndex;\n"
+              "    nextPageNumber = pos.pageNumber;\n",
+          )
+
+          # 3) Exact behavior from upstream #2945, including 204=no remote progress.
+          replace_once(
+              "lib/KOReaderSync/KOReaderSyncClient.cpp",
+              "  if (httpCode <= 0) return NETWORK_ERROR;\n"
+              "  if (httpCode == 200) return OK;\n"
+              "  if (httpCode == 401) return AUTH_FAILED;\n",
+              "  if (httpCode <= 0) return NETWORK_ERROR;\n"
+              "  // Any 2xx is success. KOSync-compatible implementations, including\n"
+              "  // Spring-based servers such as Grimmory, may use idiomatic status codes.\n"
+              "  if (httpCode >= 200 && httpCode < 300) return OK;\n"
+              "  if (httpCode == 401) return AUTH_FAILED;\n",
+          )
+          replace_once(
+              "lib/KOReaderSync/KOReaderSyncClient.cpp",
+              "  if (httpCode <= 0) return NETWORK_ERROR;\n"
+              "  if (httpCode == 200 || httpCode == 201) return OK;\n"
+              "  if (httpCode == 402) return USER_EXISTS;\n",
+              "  if (httpCode <= 0) return NETWORK_ERROR;\n"
+              "  if (httpCode >= 200 && httpCode < 300) return OK;\n"
+              "  if (httpCode == 402) return USER_EXISTS;\n",
+          )
+          replace_once(
+              "lib/KOReaderSync/KOReaderSyncClient.cpp",
+              "  if (httpCode == 200) {\n"
+              "    JsonDocument doc;\n",
+              "  // 204 is a successful response with no stored progress on some\n"
+              "  // KOSync-compatible servers; map it to the normal no-remote path.\n"
+              "  if (httpCode == 204) {\n"
+              "    http.end();\n"
+              "    return NOT_FOUND;\n"
+              "  }\n\n"
+              "  if (httpCode >= 200 && httpCode < 300) {\n"
+              "    JsonDocument doc;\n",
+          )
+          replace_once(
+              "lib/KOReaderSync/KOReaderSyncClient.cpp",
+              "  if (httpCode <= 0) return NETWORK_ERROR;\n"
+              "  if (httpCode == 200 || httpCode == 202) return OK;\n"
+              "  if (httpCode == 401) return AUTH_FAILED;\n",
+              "  if (httpCode <= 0) return NETWORK_ERROR;\n"
+              "  // Accept all successful KOSync-compatible PUT responses (200-299).\n"
+              "  if (httpCode >= 200 && httpCode < 300) return OK;\n"
+              "  if (httpCode == 401) return AUTH_FAILED;\n",
+          )
+
+          # Guard the intended end state before committing.
+          footnote = Path("lib/Epub/Epub/FootnoteEntry.h").read_text()
+          section = Path("lib/Epub/Epub/Section.cpp").read_text()
+          reader_h = Path("src/activities/reader/EpubReaderActivity.h").read_text()
+          reader_cpp = Path("src/activities/reader/EpubReaderActivity.cpp").read_text()
+          kosync = Path("lib/KOReaderSync/KOReaderSyncClient.cpp").read_text()
+
+          assert "#define FOOTNOTE_HREF_LEN 256" in footnote
+          assert "SECTION_FILE_VERSION = 36" in section
+          assert "void clearDeferredReposition();" in reader_h
+          assert "void EpubReaderActivity::clearDeferredReposition()" in reader_cpp
+          assert reader_cpp.count("clearDeferredReposition();") >= 7
+          assert kosync.count("httpCode >= 200 && httpCode < 300") == 4
+          assert "if (httpCode == 204)" in kosync
+
+          # Self-remove: the branch diff against master will contain only the backports.
+          Path(".github/workflows/backport-1.6-critical.yml").unlink()
+          PY
+
+          git diff --check
+
+      - name: Commit backports
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "backport: CrossPoint 1.6 critical reader fixes"
+          git push origin HEAD:sync/1.6-critical-fixes
