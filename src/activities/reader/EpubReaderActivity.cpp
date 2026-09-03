@@ -1745,9 +1745,7 @@ bool EpubReaderActivity::applyDeferredReposition() {
   return changed;
 }
 
-void EpubReaderActivity::clearDeferredReposition() {
-  cachedChapterTotalPageCount = 0;
-}
+void EpubReaderActivity::clearDeferredReposition() { cachedChapterTotalPageCount = 0; }
 
 bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {
   return EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount);
