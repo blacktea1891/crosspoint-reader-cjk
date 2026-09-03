@@ -195,6 +195,8 @@ class EpubReaderActivity final : public Activity {
   // (used after a settings change re-paginates a chapter). Returns true if currentPage moved.
   // No-op while the section is still building or when the pagination is unchanged (plain resume).
   bool applyDeferredReposition();
+  // Explicit navigation supersedes the session-start/settings-reflow anchor.
+  void clearDeferredReposition();
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   void queueProgressSave();
   // Keep a user-visible return, jump, or page turn off optional SD-font

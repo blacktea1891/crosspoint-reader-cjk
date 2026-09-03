@@ -28,7 +28,8 @@ namespace {
 // v34: first-line indentation is part of the render spec and cache key.
 // v35: section layout image probing runs with deterministic inflate scratch; invalidate
 //      caches that may have silently omitted images after a low-memory probe failure.
-constexpr uint8_t SECTION_FILE_VERSION = 35;
+// v36 (CJK backport): Footnote href records grew from 96 to 256 bytes.
+constexpr uint8_t SECTION_FILE_VERSION = 36;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
